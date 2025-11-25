@@ -1,6 +1,6 @@
 import pandas as pd
 
-df = pd.read_csv('champions-league-2024-UTC.csv', sep=';')
+df = pd.read_csv('dataset/2022-2023-football-player-stats.csv', sep=';')
 df_attaquants = df[
     (df['Pos'].str.contains('FW', na=False)) & 
     (df['Min'] >= 300)

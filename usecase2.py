@@ -12,7 +12,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, classification_report
 
 # 1. --- CHARGEMENT & NETTOYAGE DES TYPES ---
-csv_path = "champions-league-2024-UTC.csv"
+csv_path = "dataset/2022-2023-football-player-stats.csv"
 try:
     df = pd.read_csv(csv_path, sep=';', decimal=',', index_col='Rk', encoding='latin1')
 except Exception as e:
