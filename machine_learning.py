@@ -73,6 +73,117 @@ def compute_attack_score(df, min_minutes=450, top_quantile=0.90):
     return df
 
 
+def analyze_feature_importance(df, min_minutes=450):
+    """
+    Analyze feature importance using correlations with AttackScore
+    Visualizes which features are most important for predicting top attackers
+    """
+    # Prepare data (same filtering as compute_attack_score)
+    df_num = df.drop(columns=["Rk", "Player", "Nation", "Pos", "Squad", "Comp"], errors='ignore')
+    df_num = df_num.apply(pd.to_numeric, errors='coerce').fillna(0)
+
+    df_num['Minutes'] = df_num.get('90s', 0) * 90
+    mask = df_num['Minutes'] >= min_minutes
+    num = df_num[mask].copy()
+
+    # Create engineered features (same as in compute_attack_score)
+    num['Goals_per90_reg'] = num['Goals'] / (num['90s'] + 2)
+    num['Shots_per90_reg'] = num['Shots'] / (num['90s'] + 2)
+    num['SoT_per90_reg'] = num['SoT'] / (num['90s'] + 2)
+    num['SCA_per90'] = num['SCA'] / (num['90s'] + 2)
+    num['GCA_per90'] = num['GCA'] / (num['90s'] + 2)
+    num['PasAss_per90'] = num['PasAss'] / (num['90s'] + 2)
+    num['TklAtt3rd_per90'] = num['TklAtt3rd'] / (num['90s'] + 2)
+    num['TouAtt3rd_per90'] = num['TouAtt3rd'] / (num['90s'] + 2)
+    num['G_Sh_adj'] = np.log1p((num.get('G/Sh', 0).replace(0, 0) * num.get('Shots', 0)).clip(lower=0))
+    num['G_SoT_adj'] = np.log1p((num.get('G/SoT', 0).replace(0, 0) * num.get('SoT', 0)).clip(lower=0))
+
+    # Feature set
+    feature_cols = [
+        'Goals_per90_reg', 'G_Sh_adj', 'G_SoT_adj',
+        'Shots_per90_reg', 'SoT_per90_reg',
+        'SCA_per90', 'GCA_per90', 'PasAss_per90',
+        'TklAtt3rd_per90', 'TouAtt3rd_per90'
+    ]
+
+    # Calculate correlation with AttackScore
+    num_with_score = num[feature_cols].copy()
+    num_with_score['AttackScore'] = df.loc[num.index, 'AttackScore']
+
+    correlations = num_with_score.corr()['AttackScore'].drop('AttackScore')
+    feature_importance = pd.DataFrame({
+        'Feature': correlations.index,
+        'Importance': np.abs(correlations.values)  # Use absolute correlation
+    }).sort_values('Importance', ascending=True)
+
+    print("\n" + "="*70)
+    print("FEATURE IMPORTANCE ANALYSIS")
+    print("="*70)
+    print("\nCorrelation with AttackScore (absolute values):")
+    print(feature_importance.sort_values('Importance', ascending=False).to_string(index=False))
+
+    # 1. Horizontal bar chart - Feature Importance
+    plt.figure(figsize=(12, 6))
+    colors = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(feature_importance)))
+    plt.barh(feature_importance['Feature'], feature_importance['Importance'], color=colors)
+    plt.xlabel('Correlation Strength', fontsize=12, fontweight='bold')
+    plt.title('Feature Importance for Top Attackers\n(Correlation with AttackScore)',
+                   fontsize=13, fontweight='bold')
+    plt.grid(axis='x', alpha=0.3)
+    for i, v in enumerate(feature_importance['Importance']):
+        plt.text(v, i, f' {v:.4f}', va='center', fontsize=10)
+    plt.tight_layout()
+    plt.show()
+
+    # 2. Pie chart - Feature contribution percentage
+    plt.figure(figsize=(10, 8))
+    top_features = feature_importance.nlargest(7, 'Importance')
+    other_importance = feature_importance[~feature_importance['Feature'].isin(top_features['Feature'])]['Importance'].sum()
+
+    pie_data = list(top_features['Importance']) + [other_importance]
+    pie_labels = list(top_features['Feature']) + ['Others']
+    colors_pie = plt.cm.Set3(np.linspace(0, 1, len(pie_data)))
+
+    plt.pie(pie_data, labels=pie_labels, autopct='%1.1f%%', colors=colors_pie, startangle=90)
+    plt.title('Feature Importance Distribution', fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+
+    # 3. Ranked features with values
+    plt.figure(figsize=(12, 6))
+    feature_importance_sorted = feature_importance.sort_values('Importance', ascending=False)
+    colors_rank = plt.cm.viridis(np.linspace(0, 1, len(feature_importance_sorted)))
+    plt.barh(range(len(feature_importance_sorted)), feature_importance_sorted['Importance'].values, color=colors_rank)
+    plt.yticks(range(len(feature_importance_sorted)), feature_importance_sorted['Feature'].values)
+    plt.xlabel('Correlation Strength', fontsize=12, fontweight='bold')
+    plt.title('All Features Ranked by Importance', fontsize=13, fontweight='bold')
+    plt.gca().invert_yaxis()
+    plt.grid(axis='x', alpha=0.3)
+    for i, (idx, row) in enumerate(feature_importance_sorted.iterrows()):
+        plt.text(row['Importance'], i, f" {row['Importance']:.4f}", va='center', fontsize=10, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+
+    # 4. Scatter plot - Features vs AttackScore
+    plt.figure(figsize=(10, 7))
+    top_3_features = feature_importance_sorted.head(3)['Feature'].values
+    colors_scatter = ['#FF6B6B', '#4ECDC4', '#45B7D1']
+
+    for i, feature in enumerate(top_3_features):
+        plt.scatter(num_with_score[feature], num_with_score['AttackScore'],
+                   alpha=0.6, s=80, label=feature, color=colors_scatter[i])
+
+    plt.xlabel('Feature Value', fontsize=12, fontweight='bold')
+    plt.ylabel('AttackScore', fontsize=12, fontweight='bold')
+    plt.title('Top 3 Features vs AttackScore', fontsize=13, fontweight='bold')
+    plt.legend(fontsize=10)
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+    return feature_importance
+
+
 # Load data
 df = pd.read_csv('dataset/2022-2023-football-player-stats.csv', sep=';', encoding="latin1")
 
@@ -97,3 +208,6 @@ plt.xlabel('Player Index (filtered >= 450 minutes)')
 plt.ylabel('Attack Score')
 plt.legend()
 plt.show()
+
+# Analyze Feature Importance
+feature_importance = analyze_feature_importance(df, min_minutes=450)
