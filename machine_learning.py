@@ -22,7 +22,6 @@ def compute_attack_score(df, min_minutes=450, top_quantile=0.90):
     if mask.sum() == 0:
         raise ValueError("No players pass the minutes filter. Lower min_minutes.")
 
-    df_f = df[mask].copy()
     num = df_num[mask].copy()
 
     # regularized per90 (add pseudo-count to denominator to stabilize small samples)
