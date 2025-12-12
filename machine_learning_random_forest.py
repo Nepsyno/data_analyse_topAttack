@@ -3,9 +3,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.decomposition import PCA
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.preprocessing import MinMaxScaler
 
 
@@ -122,7 +122,7 @@ def plot_feature_importance(df, num, features):
 
     # Visualize
     plt.figure(figsize=(10, 6))
-    colors = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(importance_df)))
+    colors = plt.cm.Spectral(np.linspace(0.2, 0.8, len(importance_df)))
 
     plt.barh(importance_df['Feature'], importance_df['Importance'], color=colors)
     plt.xlabel('Correlation Strength', fontsize=12, fontweight='bold')
@@ -139,114 +139,137 @@ def plot_feature_importance(df, num, features):
 
 
 # ============================================================================
-# KNN MODEL - HYPERPARAMETER TUNING
+# RANDOM FOREST WITH RANDOMIZEDSEARCHCV
 # ============================================================================
 
-def train_knn_with_tuning(df, num, features, min_minutes=450):
-    """Train KNN with manual hyperparameter search and visualization."""
+def train_random_forest_with_tuning(df, num, features):
+    """Train Random Forest with RandomizedSearchCV for hyperparameter optimization."""
 
     X = num[features].copy()
     y = df.loc[num.index, 'TopAttacker'].astype(int)
 
-    # Parameter ranges - use more reasonable test size range
-    k_values = np.arange(3, 20, 1)
-    test_sizes = np.arange(0.2, 0.5, 0.05)
-
-    print("\n" + "=" * 70)
-    print("KNN HYPERPARAMETER TUNING")
-    print("=" * 70)
-    print(f"Testing {len(k_values)} k values and {len(test_sizes)} test_size values")
-
-    # Grid search with cross-validation
-    results_acc = np.zeros((len(test_sizes), len(k_values)))
-    results_f1 = np.zeros((len(test_sizes), len(k_values)))
-    results_cv = np.zeros((len(test_sizes), len(k_values)))  # Cross-validation scores
-
-    for i, test_size in enumerate(test_sizes):
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=y
-        )
-
-        scaler = MinMaxScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-
-        for j, k in enumerate(k_values):
-            knn = KNeighborsClassifier(n_neighbors=k, metric='euclidean')
-
-            # Cross-validation on training set
-            cv_scores = cross_val_score(knn, X_train_scaled, y_train, cv=5, scoring='f1')
-            results_cv[i, j] = cv_scores.mean()
-
-            # Test set performance
-            knn.fit(X_train_scaled, y_train)
-            y_pred = knn.predict(X_test_scaled)
-
-            results_acc[i, j] = accuracy_score(y_test, y_pred)
-            results_f1[i, j] = f1_score(y_test, y_pred)
-
-    # Find best parameters based on cross-validation (more reliable than test set)
-    best_idx_cv = np.unravel_index(results_cv.argmax(), results_cv.shape)
-    best_k = k_values[best_idx_cv[1]]
-    best_test_size = test_sizes[best_idx_cv[0]]
-
-    print(f"\nBest k: {best_k}")
-    print(f"Best test_size: {best_test_size:.2f}")
-    print(f"Best CV F1 Score: {results_cv[best_idx_cv]:.4f}")
-    print(f"Test F1 Score: {results_f1[best_idx_cv]:.4f}")
-
-    # Check for overfitting
-    overfit_diff = results_f1[best_idx_cv] - results_cv[best_idx_cv]
-    if overfit_diff > 0.1:
-        print(f"⚠️  WARNING: Possible overfitting detected! Test score - CV score = {overfit_diff:.4f}")
-
-    # Visualize heatmap using CV scores (more reliable)
-    fig, ax = plt.subplots(figsize=(14, 6))
-    sns.heatmap(results_cv, annot=True, fmt='.3f', cmap='YlOrRd', cbar=True,
-                xticklabels=k_values, yticklabels=[f'{ts:.2f}' for ts in test_sizes],
-                ax=ax, cbar_kws={'label': 'CV F1 Score'})
-
-    # Highlight best
-    rect = plt.Rectangle((best_idx_cv[1], best_idx_cv[0]), 1, 1, fill=False, edgecolor='blue', linewidth=3)
-    ax.add_patch(rect)
-
-    plt.title(
-        f'KNN Hyperparameter Tuning - Cross-Validation F1 Score\n(Best: k={best_k}, test_size={best_test_size:.2f})',
-        fontsize=14, fontweight='bold')
-    plt.xlabel('Number of Neighbors (k)', fontsize=12, fontweight='bold')
-    plt.ylabel('Test Size Ratio', fontsize=12, fontweight='bold')
-    plt.tight_layout()
-    plt.show()
-
-    return best_k, best_test_size, X, y
-
-
-# ============================================================================
-# FINAL KNN MODEL & EVALUATION
-# ============================================================================
-
-def train_final_knn_model(X, y, best_k, best_test_size):
-    """Train final KNN model and evaluate performance."""
-
+    # Split data
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=best_test_size, random_state=42, stratify=y
+        X, y, test_size=0.30, random_state=42, stratify=y
     )
 
+    print("\n" + "=" * 70)
+    print("RANDOM FOREST - HYPERPARAMETER TUNING WITH RANDOMIZEDSEARCHCV")
+    print("=" * 70)
+    print(f"Train set: {len(X_train)} players | Test set: {len(X_test)} players")
+    print(f"Top Attackers - Train: {y_train.sum()} | Test: {y_test.sum()}\n")
+
+    # Normalize
     scaler = MinMaxScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    # Train
-    knn = KNeighborsClassifier(n_neighbors=best_k, metric='euclidean')
-    knn.fit(X_train_scaled, y_train)
+    # Define hyperparameter distributions for RandomizedSearchCV
+    param_dist = {
+        'n_estimators': [50, 100, 200, 300, 500],
+        'max_depth': [5, 10, 15, 20, 30, None],
+        'min_samples_split': [2, 5, 10, 20],
+        'min_samples_leaf': [1, 2, 4, 8],
+        'max_features': ['sqrt', 'log2'],
+        'bootstrap': [True, False],
+        'criterion': ['gini', 'entropy'],
+    }
 
-    # Evaluate
-    y_pred = knn.predict(X_test_scaled)
+    # Initialize Random Forest
+    rf = RandomForestClassifier(random_state=42, n_jobs=-1)
+
+    # RandomizedSearchCV - teste 30 combinaisons aléatoires
+    print("Running RandomizedSearchCV (30 iterations)...")
+    random_search = RandomizedSearchCV(
+        rf,
+        param_distributions=param_dist,
+        n_iter=30,  # Nombre de combinaisons à tester
+        cv=5,  # 5-fold cross-validation
+        scoring='f1',
+        random_state=42,
+        n_jobs=-1,
+        verbose=0
+    )
+
+    random_search.fit(X_train_scaled, y_train)
+
+    print("\n✓ RandomizedSearchCV Completed!")
+    print(f"\nBest Parameters:")
+    for param, value in random_search.best_params_.items():
+        print(f"  - {param}: {value}")
+
+    print(f"\nBest CV F1 Score: {random_search.best_score_:.4f}")
+
+    # Get best model
+    best_rf = random_search.best_estimator_
+
+    # Evaluate on test set
+    y_pred = best_rf.predict(X_test_scaled)
+    test_f1 = f1_score(y_test, y_pred)
+    test_acc = accuracy_score(y_test, y_pred)
+
+    print(f"Test F1 Score: {test_f1:.4f}")
+    print(f"Test Accuracy: {test_acc:.4f}")
+
+    # Check overfitting
+    overfit_diff = test_f1 - random_search.best_score_
+    if overfit_diff > 0.1:
+        print(f"⚠️  WARNING: Possible overfitting! Diff = {overfit_diff:.4f}")
+    elif overfit_diff < -0.15:
+        print(f"⚠️  WARNING: Possible underfitting! Diff = {overfit_diff:.4f}")
+    else:
+        print(f"✓ Good balance (Diff = {overfit_diff:.4f})")
+
+    # Visualize hyperparameter search results
+    results_df = pd.DataFrame(random_search.cv_results_)
+    results_df = results_df.sort_values('mean_test_score', ascending=False)
+
+    plt.figure(figsize=(12, 6))
+
+    plt.subplot(1, 2, 1)
+    top_10 = results_df.head(10)
+    iterations = range(1, len(top_10) + 1)
+    colors_iter = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(top_10)))
+
+    plt.barh(iterations, top_10['mean_test_score'].values, color=colors_iter)
+    plt.xlabel('Mean CV F1 Score', fontsize=12, fontweight='bold')
+    plt.ylabel('Top 10 Iterations', fontsize=12, fontweight='bold')
+    plt.title('Top 10 Best Hyperparameter Combinations', fontsize=13, fontweight='bold')
+    plt.xlim([0, 1])
+
+    for i, v in enumerate(top_10['mean_test_score'].values):
+        plt.text(v + 0.02, i + 1, f'{v:.3f}', va='center', fontsize=9, fontweight='bold')
+
+    plt.subplot(1, 2, 2)
+    iterations_all = range(1, len(results_df) + 1)
+    plt.scatter(iterations_all, results_df['mean_test_score'].values,
+                alpha=0.6, s=80, c=results_df['mean_test_score'].values, cmap='RdYlGn', edgecolors='black',
+                linewidth=0.5)
+    plt.axhline(y=random_search.best_score_, color='green', linestyle='--', linewidth=2,
+                label=f'Best Score: {random_search.best_score_:.3f}')
+    plt.xlabel('Iteration Number', fontsize=12, fontweight='bold')
+    plt.ylabel('CV F1 Score', fontsize=12, fontweight='bold')
+    plt.title('RandomizedSearchCV - All 30 Iterations', fontsize=13, fontweight='bold')
+    plt.legend(fontsize=10)
+    plt.grid(alpha=0.3, axis='y')
+
+    plt.tight_layout()
+    plt.show()
+
+    return best_rf, scaler, X_train_scaled, X_test_scaled, X, y, y_test, y_pred
+
+
+# ============================================================================
+# RANDOM FOREST EVALUATION
+# ============================================================================
+
+def evaluate_random_forest(y_test, y_pred, best_rf, X_test_scaled, features):
+    """Display detailed evaluation metrics and confusion matrix."""
 
     print("\n" + "=" * 70)
-    print("FINAL KNN MODEL - TEST SET PERFORMANCE")
+    print("RANDOM FOREST - TEST SET PERFORMANCE")
     print("=" * 70)
-    print(f"Train set: {len(X_train)} players | Test set: {len(X_test)} players")
+
     print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
     print(f"F1 Score: {f1_score(y_test, y_pred):.4f}")
     print("\nClassification Report:")
@@ -254,38 +277,77 @@ def train_final_knn_model(X, y, best_k, best_test_size):
 
     # Confusion Matrix
     cm = confusion_matrix(y_test, y_pred)
+
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=True,
                 xticklabels=['Not Top', 'Top'], yticklabels=['Not Top', 'Top'])
-    plt.title('Confusion Matrix - KNN Classifier', fontsize=13, fontweight='bold')
+
+    # Add percentages
+    for i in range(2):
+        for j in range(2):
+            total = cm[i].sum()
+            pct = cm[i, j] / total * 100 if total > 0 else 0
+            plt.text(j + 0.5, i + 0.7, f'({pct:.1f}%)',
+                     ha='center', va='center', fontsize=10, color='gray', fontweight='bold')
+
+    plt.title('Confusion Matrix - Random Forest Classifier', fontsize=13, fontweight='bold')
     plt.ylabel('True Label', fontsize=12, fontweight='bold')
     plt.xlabel('Predicted Label', fontsize=12, fontweight='bold')
     plt.tight_layout()
     plt.show()
 
-    return knn, X_train_scaled, X_test_scaled, scaler
+    # Feature Importance from Random Forest
+    feature_importance = pd.DataFrame({
+        'Feature': features,
+        'Importance': best_rf.feature_importances_
+    }).sort_values('Importance', ascending=False)
+
+    print("\n" + "=" * 70)
+    print("FEATURE IMPORTANCE (Random Forest)")
+    print("=" * 70)
+    print(feature_importance.to_string(index=False))
+
+    # Visualize Feature Importance
+    plt.figure(figsize=(10, 6))
+    colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(feature_importance)))
+
+    plt.barh(feature_importance['Feature'], feature_importance['Importance'], color=colors)
+    plt.xlabel('Importance Score', fontsize=12, fontweight='bold')
+    plt.title('Feature Importance - Random Forest Model', fontsize=13, fontweight='bold')
+    plt.grid(axis='x', alpha=0.3)
+
+    for i, v in enumerate(feature_importance['Importance'].values):
+        plt.text(v + 0.005, i, f'{v:.3f}', va='center', fontsize=10, fontweight='bold')
+
+    plt.tight_layout()
+    plt.show()
+
+    return feature_importance
 
 
 # ============================================================================
-# PCA VISUALIZATION - CLUSTERS & ATTACK SCORE
+# PCA VISUALIZATION
 # ============================================================================
 
-def visualize_knn_with_pca(df, X, knn, scaler, num, features):
-    """Visualize KNN clusters using PCA with 2 different colorings."""
+def visualize_rf_with_pca(df, X, best_rf, scaler, num):
+    """Visualize Random Forest predictions using PCA."""
 
     # Scale all data and get predictions
     X_scaled = scaler.fit_transform(X)
-    predictions = knn.predict(X_scaled)
+    predictions = best_rf.predict(X_scaled)
 
     # Apply PCA
     pca = PCA(n_components=2)
     X_pca = pca.fit_transform(X_scaled)
 
     print("\n" + "=" * 70)
-    print("PCA VISUALIZATION")
+    print("PCA VISUALIZATION - RANDOM FOREST PREDICTIONS")
     print("=" * 70)
+    print(f"PC1 explains {pca.explained_variance_ratio_[0] * 100:.1f}% of variance")
+    print(f"PC2 explains {pca.explained_variance_ratio_[1] * 100:.1f}% of variance")
+    print(f"Total: {sum(pca.explained_variance_ratio_) * 100:.1f}%")
 
-    # AttackScore Gradient Visualization
+    # Visualization
     fig, ax = plt.subplots(figsize=(10, 8))
 
     mask_not_top = predictions == 0
@@ -294,14 +356,15 @@ def visualize_knn_with_pca(df, X, knn, scaler, num, features):
     attack_scores = df.loc[num.index, 'AttackScore'].values
 
     scatter = ax.scatter(X_pca[:, 0], X_pca[:, 1],
-                          c=attack_scores, cmap='YlOrRd', alpha=0.7, s=120, edgecolors='black', linewidth=0.5)
+                         c=attack_scores, cmap='YlOrRd', alpha=0.7, s=120, edgecolors='black', linewidth=0.5)
     ax.scatter(X_pca[mask_top, 0], X_pca[mask_top, 1],
-                c='darkred', alpha=0.9, s=250, marker='*', edgecolors='darkred', linewidth=2, label='Top Attacker',
-                zorder=10)
+               c='darkred', alpha=0.9, s=250, marker='*', edgecolors='darkred', linewidth=2,
+               label='Top Attacker (Predicted)',
+               zorder=10)
 
-    ax.set_xlabel(f'PC1', fontsize=12, fontweight='bold')
-    ax.set_ylabel(f'PC2', fontsize=12, fontweight='bold')
-    ax.set_title('Players - Colored by AttackScore', fontsize=13, fontweight='bold')
+    ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0] * 100:.1f}%)', fontsize=12, fontweight='bold')
+    ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1] * 100:.1f}%)', fontsize=12, fontweight='bold')
+    ax.set_title('Random Forest Predictions - Colored by AttackScore', fontsize=13, fontweight='bold')
     plt.colorbar(scatter, ax=ax, label='AttackScore')
     ax.legend(fontsize=11, loc='best')
     ax.grid(alpha=0.3)
@@ -333,15 +396,16 @@ if __name__ == '__main__':
     plot_attack_score_distribution(df_valid)
     importance_df = plot_feature_importance(df, num, features)
 
-    # KNN tuning and training
-    best_k, best_test_size, X, y = train_knn_with_tuning(df, num, features)
-    knn, X_train_scaled, X_test_scaled, scaler = train_final_knn_model(X, y, best_k, best_test_size)
+    # Random Forest with RandomizedSearchCV
+    best_rf, scaler, X_train_scaled, X_test_scaled, X, y, y_test, y_pred = train_random_forest_with_tuning(df, num,
+                                                                                                           features)
+
+    # Evaluation
+    feature_importance = evaluate_random_forest(y_test, y_pred, best_rf, X_test_scaled, features)
 
     # Final visualization
-    visualize_knn_with_pca(df, X, knn, scaler, num, features)
+    visualize_rf_with_pca(df, X, best_rf, scaler, num)
 
     print("\n" + "=" * 70)
     print("ANALYSIS COMPLETE!")
     print("=" * 70)
-
-# si je devais expliquer le fonctionnement du code & knn de manière simple mais avec des termes technique en mode story telling comment je proccède ?
