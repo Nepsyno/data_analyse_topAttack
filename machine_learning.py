@@ -343,5 +343,3 @@ if __name__ == '__main__':
     print("\n" + "=" * 70)
     print("ANALYSIS COMPLETE!")
     print("=" * 70)
-
-# si je devais expliquer le fonctionnement du code & knn de manière simple mais avec des termes technique en mode story telling comment je proccède ?
